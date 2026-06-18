@@ -12,6 +12,7 @@
 	let sourceUrl = '';
 	let fileInput;
 	let device = env.PUBLIC_WHISHPER_PROFILE == 'gpu' ? 'cuda' : 'cpu';
+	let isPlaylist = false;
 
 	let languages = [
 		'auto',
@@ -77,6 +78,11 @@
 		   return;
 	   }
 
+	   if (isPlaylist) {
+		   await sendPlaylist();
+		   return;
+	   }
+
 	   let formData = new FormData();
 	   formData.append('language', language);
 	   formData.append('modelSize', modelSize);
@@ -139,6 +145,58 @@
 	   uploadProgress.set(0);
 
 	   toast.success('Success!');
+	}
+
+	async function sendPlaylist() {
+		if (!sourceUrl) {
+			toast.error('Enter a playlist URL.');
+			return;
+		}
+
+		let formData = new FormData();
+		formData.append('language', language);
+		formData.append('modelSize', modelSize);
+		if (device == 'cuda' || device == 'cpu') {
+			formData.append('device', device);
+		} else {
+			formData.append('device', 'cpu');
+		}
+		formData.append('sourceUrl', sourceUrl);
+		formData.append('beam_size', beamSize);
+		if (initialPrompt && initialPrompt.trim() !== '') {
+			formData.append('initial_prompt', initialPrompt);
+		}
+		if (hotwords && hotwords.trim() !== '') {
+			formData.append('hotwords', hotwords);
+		}
+
+		try {
+			const res = await fetch(`${CLIENT_API_HOST}/api/transcriptions/playlist`, {
+				method: 'POST',
+				body: formData
+			});
+
+			if (!res.ok) {
+				const errText = await res.text();
+				toast.error(`Playlist import failed: ${errText}`);
+				return;
+			}
+
+			const data = await res.json();
+			let msg = `Created ${data.count} transcription job${data.count !== 1 ? 's' : ''} from playlist`;
+			if (data.skipped && data.skipped.length > 0) {
+				msg += `, ${data.skipped.length} already exist`;
+			}
+			if (data.errors && data.errors.length > 0) {
+				msg += `, ${data.errors.length} failed`;
+			}
+			toast.success(msg);
+
+			sourceUrl = '';
+			fileInput.value = '';
+		} catch (e) {
+			toast.error(`Playlist import error: ${e.message}`);
+		}
 	}
 
 	// Reactive statement
@@ -212,6 +270,7 @@
 						name="file"
 						bind:this={fileInput}
 						type="file"
+						disabled={isPlaylist}
 						class="w-full file-input file-input-sm file-input-bordered file-input-primary"
 					/>
 				</div>
@@ -227,6 +286,13 @@
 						placeholder="https://youtube.com/watch?v=Hd33fCdW"
 						class="w-full input input-sm input-bordered input-primary"
 					/>
+				</div>
+
+				<div class="w-full form-control">
+					<label class="label cursor-pointer justify-start gap-2">
+						<input type="checkbox" bind:checked={isPlaylist} class="checkbox checkbox-primary checkbox-sm" />
+						<span class="label-text">Import YouTube playlist</span>
+					</label>
 				</div>
 			</div>
 

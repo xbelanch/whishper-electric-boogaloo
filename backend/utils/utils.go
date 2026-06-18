@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -126,6 +127,85 @@ func SendTranscriptionRequest(t *models.Transcription, body *bytes.Buffer, write
    }
 
    return asrResponse, nil
+}
+
+type PlaylistEntry struct {
+	VideoURL string `json:"videoUrl"`
+	Title    string `json:"title"`
+	ID       string `json:"id"`
+	Index    int    `json:"index"`
+}
+
+func ExtractPlaylistEntries(ctx context.Context, playlistURL string) ([]PlaylistEntry, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	args := []string{
+		"--flat-playlist",
+		"--dump-single-json",
+		"--no-warnings",
+		"--yes-playlist",
+		playlistURL,
+	}
+
+	log.Debug().Msgf("Running yt-dlp playlist extraction: %v", args)
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
+	stdout, err := cmd.Output()
+	if err != nil {
+		var stderr []byte
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = exitErr.Stderr
+		}
+		log.Error().Err(err).Msgf("yt-dlp failed: %s", string(stderr))
+		return nil, fmt.Errorf("yt-dlp extraction failed: %w", err)
+	}
+
+	var result struct {
+		ID      string `json:"id"`
+		Title   string `json:"title"`
+		Entries []struct {
+			ID      string `json:"id"`
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Index   int    `json:"playlist_index"`
+		} `json:"entries"`
+	}
+
+	if err := json.Unmarshal(stdout, &result); err != nil {
+		log.Error().Err(err).Msg("Failed to parse yt-dlp JSON output")
+		return nil, fmt.Errorf("failed to parse yt-dlp output: %w", err)
+	}
+
+	if len(result.Entries) == 0 {
+		return nil, fmt.Errorf("no entries found in playlist")
+	}
+
+	seen := make(map[string]bool)
+	var entries []PlaylistEntry
+	for _, e := range result.Entries {
+		if e.ID == "" {
+			continue
+		}
+		if seen[e.ID] {
+			continue
+		}
+		seen[e.ID] = true
+
+		videoURL := e.URL
+		if videoURL == "" {
+			videoURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", e.ID)
+		}
+
+		entries = append(entries, PlaylistEntry{
+			VideoURL: videoURL,
+			Title:    e.Title,
+			ID:       e.ID,
+			Index:    e.Index,
+		})
+	}
+
+	log.Debug().Msgf("Extracted %d unique entries from playlist %q", len(entries), result.Title)
+	return entries, nil
 }
 
 func CheckTranscriptionServiceHealth() (ok bool, message string) {

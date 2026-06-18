@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"codeberg.org/pluja/whishper/models"
+	"codeberg.org/pluja/whishper/utils"
 )
 
 func (s *Server) handleGetAllTranscriptions(c *fiber.Ctx) error {
@@ -137,6 +139,108 @@ func (s *Server) handlePostTranscription(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
 	c.Write(json)
 	return nil
+}
+
+func (s *Server) handlePostTranscriptionPlaylist(c *fiber.Ctx) error {
+	log.Debug().Msg("POST /api/transcriptions/playlist")
+
+	sourceUrl := c.FormValue("sourceUrl")
+	if sourceUrl == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "sourceUrl is required")
+	}
+
+	modelSize := c.FormValue("modelSize")
+	language := c.FormValue("language")
+	device := c.FormValue("device")
+	if device != "cpu" && device != "cuda" {
+		log.Warn().Msgf("Device %v not supported, using cpu", device)
+		device = "cpu"
+	}
+	var beamSize int
+	if c.FormValue("beam_size") != "" {
+		fmt.Sscanf(c.FormValue("beam_size"), "%d", &beamSize)
+	}
+	initialPrompt := c.FormValue("initial_prompt")
+	hotwordsStr := c.FormValue("hotwords")
+	var hotwords []string
+	if hotwordsStr != "" {
+		for _, hw := range SplitAndTrim(hotwordsStr, ",") {
+			if hw != "" {
+				hotwords = append(hotwords, hw)
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	entries, err := utils.ExtractPlaylistEntries(ctx, sourceUrl)
+	if err != nil {
+		log.Error().Err(err).Msg("Error extracting playlist entries")
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Failed to extract playlist: %v", err))
+	}
+
+	if len(entries) == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "No entries found in playlist")
+	}
+
+	var created []*models.Transcription
+	var skipped []string
+	var errors []string
+
+	for _, entry := range entries {
+		if entry.VideoURL == "" {
+			continue
+		}
+
+		existing := s.Db.GetTranscriptionBySourceUrl(entry.VideoURL)
+		if existing != nil {
+			skipped = append(skipped, entry.VideoURL)
+			log.Debug().Msgf("Skipping already-existing sourceUrl: %s", entry.VideoURL)
+			continue
+		}
+
+		transcription := models.Transcription{
+			Status:        models.TranscriptionStatusPending,
+			Language:      language,
+			ModelSize:     modelSize,
+			Task:          "transcribe",
+			Device:        device,
+			SourceUrl:     entry.VideoURL,
+			BeamSize:      beamSize,
+			InitialPrompt: initialPrompt,
+			Hotwords:      hotwords,
+			PlaylistUrl:   sourceUrl,
+			PlaylistTitle: "",
+			PlaylistIndex: entry.Index,
+		}
+
+		res, err := s.Db.NewTranscription(&transcription)
+		if err != nil {
+			log.Error().Err(err).Msgf("Error creating transcription for %s", entry.VideoURL)
+			errors = append(errors, entry.VideoURL)
+			continue
+		}
+
+		s.BroadcastTranscription(res)
+		created = append(created, res)
+	}
+
+	if len(created) > 0 {
+		s.NewTranscriptionCh <- true
+	}
+
+	response := fiber.Map{
+		"created": created,
+		"skipped": skipped,
+		"errors":  errors,
+		"count":   len(created),
+	}
+
+	log.Debug().Msgf("Playlist processed: %d created, %d skipped, %d errors", len(created), len(skipped), len(errors))
+
+	c.Status(fiber.StatusCreated)
+	return c.JSON(response)
 }
 
 // SplitAndTrim splits a string by sep and trims spaces from each part

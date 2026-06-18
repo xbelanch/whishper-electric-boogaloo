@@ -139,6 +139,16 @@ func (s *Server) RegisterRoutes() {
 		return err
 	})
 
+	// Register HTTP route for playlist expansion.
+	s.Router.Post("/api/transcriptions/playlist", func(c *fiber.Ctx) error {
+		log.Debug().Msg("POST /api/transcriptions/playlist")
+		err := s.handlePostTranscriptionPlaylist(c)
+		if err != nil {
+			log.Error().Err(err).Msg("Error handling POST /api/transcriptions/playlist")
+		}
+		return err
+	})
+
 	s.Router.Patch("/api/transcriptions", func(c *fiber.Ctx) error {
 		//log.Debug().Msgf("PATCH /api/transcriptions/%v", c.Params("id"))
 		err := s.handlePatchTranscription(c)

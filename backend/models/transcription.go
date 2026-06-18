@@ -23,6 +23,9 @@ type Transcription struct {
 	Hotwords     []string           `bson:"hotwords" json:"hotwords"`
 	Result       WhisperResult      `bson:"result" json:"result"`
 	Translations []Translation      `bson:"translations" json:"translations"`
+	PlaylistUrl  string             `bson:"playlistUrl,omitempty" json:"playlistUrl,omitempty"`
+	PlaylistTitle string            `bson:"playlistTitle,omitempty" json:"playlistTitle,omitempty"`
+	PlaylistIndex int               `bson:"playlistIndex,omitempty" json:"playlistIndex,omitempty"`
 }
 
 func (t *Transcription) Translate(target string) error {

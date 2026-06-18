@@ -182,6 +182,23 @@ func (s *MongoDb) GetRunningTranscription() []*models.Transcription {
 	return transcriptions
 }
 
+func (m *MongoDb) GetTranscriptionBySourceUrl(sourceUrl string) *models.Transcription {
+	collection := m.client.Database("whishper").Collection("transcriptions")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.D{primitive.E{Key: "sourceUrl", Value: sourceUrl}}
+	var result models.Transcription
+	err := collection.FindOne(ctx, filter).Decode(&result)
+	if err != nil {
+		if err != mongo.ErrNoDocuments {
+			log.Error().Err(err).Msgf("Error querying transcription by sourceUrl: %s", sourceUrl)
+		}
+		return nil
+	}
+	return &result
+}
+
 func (m *MongoDb) UpdateTranscription(t *models.Transcription) (*models.Transcription, error) {
 	collection := m.client.Database("whishper").Collection("transcriptions")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
