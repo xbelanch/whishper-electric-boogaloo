@@ -59,7 +59,7 @@ COPY ./transcription-api /app/transcription
 WORKDIR /app/transcription
 RUN pip install -r requirements.txt && \
     pip install python-multipart && \
-    pip3 install torch --index-url https://download.pytorch.org/whl/cu118
+    pip3 install torch --index-url https://download.pytorch.org/whl/cu121
 
 RUN pip install --no-cache-dir \
     torch torchvision torchaudio
@@ -77,7 +77,7 @@ COPY --from=frontend-build /app/build /app/frontend
 COPY --from=frontend-prod-deps /app/node_modules /app/frontend/node_modules
 
 # Golang service setup
-COPY --from=backend-builder /app/whishper /bin/whishper 
+COPY --from=backend-builder /app/whishper /bin/whishper
 RUN chmod a+rx /bin/whishper
 COPY --from=ytdlp_cache /usr/local/bin/yt-dlp /bin/yt-dlp
 
